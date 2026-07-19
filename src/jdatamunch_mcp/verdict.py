@@ -22,6 +22,11 @@ STATE_OK = "ok"
 STATE_ABSENT = "absent"
 STATE_DEGRADED = "degraded"
 
+# Version pin for the ranking/verdict scoring logic. Bump when the semantics
+# of the emitted scores or the verdict state machine change, so an agent (or a
+# replay fixture) can tell "the data changed" apart from "the scorer changed".
+SCORER_VERSION = 1
+
 _NOTES = {
     STATE_OK: "Confident matches returned.",
     STATE_ABSENT: (
@@ -64,6 +69,39 @@ def suggest_columns(
     return out
 
 
+def build_coverage_disclosure(
+    coverage: Optional[dict],
+    *,
+    indexed_at: Optional[str] = None,
+    index_version: Optional[int] = None,
+) -> Optional[dict]:
+    """Query-time coverage block for a non-``ok`` verdict.
+
+    ``coverage`` is the block persisted in ``index.json`` at ingest time. When
+    it is missing (index predates the contract) this returns None — an empty
+    block means "coverage unknown" and is never fabricated. Empty fields are
+    omitted from the returned dict.
+    """
+    if not coverage:
+        return None
+    out: dict = {}
+    generation: dict = {}
+    if indexed_at:
+        generation["indexed_at"] = indexed_at
+    if index_version is not None:
+        generation["index_version"] = index_version
+    if generation:
+        out["generation"] = generation
+    if coverage.get("walk"):
+        out["walk"] = coverage["walk"]
+    if coverage.get("rows_indexed") is not None:
+        out["rows_indexed"] = coverage["rows_indexed"]
+    excluded = {k: v for k, v in (coverage.get("skip_counts") or {}).items() if v}
+    if excluded:
+        out["excluded"] = excluded
+    return out or None
+
+
 def build_verdict(
     *,
     result_count: int,
@@ -71,11 +109,16 @@ def build_verdict(
     semantic_available: bool = True,
     lexical_used: bool = True,
     did_you_mean: Optional[Sequence[str]] = None,
+    coverage: Optional[dict] = None,
 ) -> dict:
     """Compute the ``_meta.verdict`` dict for a column search.
 
     ``degraded`` takes precedence over ``absent``: a downgraded channel means a
     partial scan, which cannot prove absence.
+
+    ``coverage`` (from :func:`build_coverage_disclosure`) is attached only to
+    ``absent`` / ``degraded`` verdicts: an absence claim must disclose what was
+    excluded at index time, while ``ok`` verdicts stay lean.
     """
     if semantic_requested and not semantic_available:
         state = STATE_DEGRADED
@@ -93,6 +136,7 @@ def build_verdict(
 
     verdict = {
         "state": state,
+        "scorer": SCORER_VERSION,
         "channels": {
             "lexical": "ok" if lexical_used else "off",
             "semantic": semantic_channel,
@@ -101,4 +145,6 @@ def build_verdict(
     }
     if did_you_mean:
         verdict["did_you_mean"] = list(did_you_mean)[:5]
+    if coverage and state in (STATE_ABSENT, STATE_DEGRADED):
+        verdict["coverage"] = coverage
     return verdict

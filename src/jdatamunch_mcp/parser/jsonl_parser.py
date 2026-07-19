@@ -43,8 +43,15 @@ def _discover_columns(path: str, encoding: str) -> list:
     return list(columns.keys())
 
 
-def _row_generator(path: str, encoding: str, column_names: list) -> Generator:
-    """Yield data rows as lists of strings, aligned to column_names."""
+def _row_generator(
+    path: str, encoding: str, column_names: list, skip_counts: dict
+) -> Generator:
+    """Yield data rows as lists of strings, aligned to column_names.
+
+    Lines that fail to parse (or aren't JSON objects) are skipped and tallied
+    in ``skip_counts`` — the shared dict surfaced via metadata["skip_counts"]
+    so index_local can persist the exclusions in the coverage block (1.20.0).
+    """
     with open(path, encoding=encoding, errors="replace") as f:
         for line in f:
             line = line.strip()
@@ -53,8 +60,10 @@ def _row_generator(path: str, encoding: str, column_names: list) -> Generator:
             try:
                 obj = json.loads(line)
             except json.JSONDecodeError:
+                skip_counts["malformed_rows"] = skip_counts.get("malformed_rows", 0) + 1
                 continue
             if not isinstance(obj, dict):
+                skip_counts["malformed_rows"] = skip_counts.get("malformed_rows", 0) + 1
                 continue
             yield [
                 normalize_native(obj.get(col), "jsonl")
@@ -88,16 +97,21 @@ def parse_jsonl(
     else:
         estimated_rows = 0
 
+    # Shared with the row generator: filled in as the iterator is consumed,
+    # so it reflects exactly the pass that built the index.
+    skip_counts: dict = {}
+
     metadata = {
         "encoding": encoding,
         "delimiter": None,
         "header_row": None,
         "estimated_rows": estimated_rows,
         "file_size": file_size,
+        "skip_counts": skip_counts,
     }
 
     return ParsedDataset(
         columns=columns,
-        row_iterator=_row_generator(path, encoding, column_names),
+        row_iterator=_row_generator(path, encoding, column_names, skip_counts),
         metadata=metadata,
     )

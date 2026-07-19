@@ -324,7 +324,10 @@ def search_data(
 
     # Suite-parity honesty verdict. degraded = semantic requested but the
     # embedding channel fell back to keyword-only; absent = zero matches.
-    from ..verdict import build_verdict, suggest_columns
+    # Non-ok verdicts carry a coverage disclosure (1.20.0): what the ingest
+    # pass excluded, so an absence claim can't lie by omission. Indexes that
+    # predate the coverage contract yield no block (unknown, never fabricated).
+    from ..verdict import build_coverage_disclosure, build_verdict, suggest_columns
     semantic_requested = bool(semantic or semantic_only)
     meta["verdict"] = build_verdict(
         result_count=len(results),
@@ -332,6 +335,11 @@ def search_data(
         semantic_available=bool(sem_scores),
         lexical_used=not semantic_only,
         did_you_mean=suggest_columns(query, idx.columns) if not results else None,
+        coverage=build_coverage_disclosure(
+            idx.coverage,
+            indexed_at=idx.indexed_at,
+            index_version=idx.index_version,
+        ),
     )
 
     return {

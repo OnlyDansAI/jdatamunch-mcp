@@ -1,5 +1,41 @@
 # Changelog
 
+## [1.20.0] - 2026-07-19 - coverage contract on absence claims
+
+Suite parity with the sibling code MCP's coverage contract, prompted by
+community feedback on the retrieval-verdict article: an `absent` verdict backed
+only by scan counts lies by omission when data was excluded at index time.
+
+### Added
+
+- **Index-time coverage block persisted in `index.json`.** Every `index_local`
+  ingest records `coverage`: `walk` (`full` or `truncated`), `rows_indexed`,
+  `skip_counts` by reason (nonzero only), and `recorded_at` (UTC). Skip reasons
+  currently tallied: `malformed_rows` (JSONL lines that fail to parse or
+  aren't objects) and `rows_over_cap` (rows beyond `JDATAMUNCH_MAX_ROWS`,
+  drain-counted exactly). In `depth="shallow"` mode the truncation is recorded
+  without a count rather than fabricating one, since draining the remainder
+  would defeat the shallow speed tradeoff. The incremental fast path leaves the
+  block untouched; a full re-ingest overwrites it (self-heals). Additive field
+  with a None default, so no `INDEX_VERSION` bump; legacy indexes load fine.
+- **`index_repo` discovery skip counts.** Files excluded at repo discovery are
+  tallied by reason (`unsupported_extension`, `skipped_path`, `oversize`,
+  `over_file_limit`, `download_failed`, `index_error`) and returned in a
+  repo-level `coverage` block (`walk`, `datasets_indexed`, `skip_counts`,
+  `recorded_at`), persisted as a `.repo-coverage-<owner>--<repo>.json` sidecar
+  next to the existing `.repo-sha` marker.
+- **Query-time coverage disclosure on non-ok verdicts.** `search_data`'s
+  `_meta.verdict` now attaches a `coverage` block to `absent` / `degraded`
+  states only: `generation` (`indexed_at`, `index_version`), `rows_indexed`,
+  and `excluded` (nonzero skip reasons). `ok` verdicts stay lean. When the
+  index predates the contract the block is omitted entirely; empty means
+  unknown and is never fabricated. Empty fields are omitted.
+- **`scorer` version pin on `_meta.verdict`** (integer, starts at 1). Bumps
+  when the score semantics or the verdict state machine change, so an agent
+  can tell "the data changed" apart from "the scorer changed".
+
+All additive and 1.x wire-compatible. Tests: `tests/test_v1_20_0.py`.
+
 ## [1.19.1] - 2026-07-16 - docs only
 
 Documentation wording only. No code, wire-format, or behavior change from 1.19.0.

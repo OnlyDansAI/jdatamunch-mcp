@@ -11,7 +11,7 @@ from jdatamunch_mcp.tools.sample_rows import sample_rows
 from jdatamunch_mcp.storage.data_store import DataStore
 
 
-_SKIP_FIELDS = {"indexed_at", "source_path"}
+_SKIP_FIELDS = {"indexed_at", "source_path", "recorded_at"}
 
 
 def _strip_volatile(d):

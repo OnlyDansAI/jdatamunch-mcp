@@ -46,6 +46,7 @@ class DataIndex:
     dataset_summary: Optional[str] = None
     fingerprint: Optional[str] = None  # C2: content fingerprint independent of filename/path
     learned_null_tokens: list = field(default_factory=list)  # C3: detected sentinel-like tokens
+    coverage: Optional[dict] = None  # 1.20.0: ingest coverage (walk, rows_indexed, skip_counts, recorded_at)
 
 
 def _hash_file(path: str) -> str:
@@ -116,6 +117,7 @@ def _index_to_dict(idx: DataIndex) -> dict:
         "dataset_summary": idx.dataset_summary,
         "fingerprint": idx.fingerprint,
         "learned_null_tokens": idx.learned_null_tokens,
+        "coverage": idx.coverage,
     }
 
 
@@ -137,6 +139,7 @@ def _index_from_dict(d: dict) -> DataIndex:
         dataset_summary=d.get("dataset_summary"),
         fingerprint=d.get("fingerprint"),
         learned_null_tokens=d.get("learned_null_tokens", []),
+        coverage=d.get("coverage"),
     )
 
 
@@ -231,6 +234,7 @@ class DataStore:
         dataset_summary: Optional[str] = None,
         fingerprint: Optional[str] = None,
         learned_null_tokens: Optional[list] = None,
+        coverage: Optional[dict] = None,
     ) -> DataIndex:
         """Build and persist a DataIndex from profiling results."""
         source_hash = _hash_file(source_path)
@@ -254,6 +258,7 @@ class DataStore:
             dataset_summary=dataset_summary,
             fingerprint=fingerprint,
             learned_null_tokens=learned_null_tokens or [],
+            coverage=coverage,
         )
 
         dir_ = self.dataset_dir(dataset_id)

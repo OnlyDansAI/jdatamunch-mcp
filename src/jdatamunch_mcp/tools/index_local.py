@@ -10,7 +10,9 @@ Crash-safety guarantees (A4):
 History (A8): on every successful (re)index, appends a snapshot to _history.jsonl.
 """
 
+import logging
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -22,6 +24,8 @@ from ..storage import result_cache
 from ..storage.sqlite_store import create_table, BulkInserter, create_indexes
 from ..storage.token_tracker import record_savings, estimate_savings
 from ..summarizer import summarize_dataset, summarize_column
+
+logger = logging.getLogger(__name__)
 
 _TYPE_SAMPLE_ROWS = 10_000  # rows used for preliminary type detection
 _FINGERPRINT_ROWS = 1_000   # C2: rows hashed for content fingerprint
@@ -210,6 +214,42 @@ def index_local(
         # --- Phase 4: Finalize profiles ---
         profiles = [finalize_profile(acc) for acc in accs]
 
+        # --- Coverage block (1.20.0): what this pass excluded ---
+        # An 'absent' verdict at query time is only honest if it can disclose
+        # what never made it into the index. Parser-level skips (e.g. malformed
+        # JSONL lines) arrive via metadata["skip_counts"], filled in as the row
+        # iterator was consumed above.
+        skip_counts: dict = {
+            k: v for k, v in (meta.get("skip_counts") or {}).items() if v
+        }
+        walk = "full"
+        if row_count >= max_rows:
+            # Row cap hit. In shallow mode the cap is a deliberate speed
+            # tradeoff — draining the remainder just to count it would defeat
+            # the point, so record the truncation without a fabricated count.
+            walk = "truncated"
+            if depth != "shallow":
+                remaining = max(0, len(sample_rows) - row_count)
+                drained = True
+                try:
+                    remaining += sum(1 for _ in row_iter)
+                except Exception as exc:
+                    drained = False
+                    logger.debug("Coverage drain-count failed: %s", exc)
+                if remaining:
+                    skip_counts["rows_over_cap"] = (
+                        skip_counts.get("rows_over_cap", 0) + remaining
+                    )
+                elif drained:
+                    walk = "full"  # cap == exact row count; nothing excluded
+        coverage: dict = {
+            "walk": walk,
+            "rows_indexed": row_count,
+            "recorded_at": datetime.now(timezone.utc).isoformat(),
+        }
+        if skip_counts:
+            coverage["skip_counts"] = skip_counts
+
         # --- Phase 5: Create SQLite indexes on low-cardinality columns ---
         create_indexes(tmp_sqlite, profiles)
 
@@ -286,6 +326,7 @@ def index_local(
             dataset_summary=ds_summary,
             fingerprint=fingerprint,
             learned_null_tokens=learned_nulls,
+            coverage=coverage,
         )
 
         # --- Invalidate cached aggregate results (B2) ---

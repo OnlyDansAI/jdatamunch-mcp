@@ -1,9 +1,12 @@
 """index_repo tool: Index data files from a GitHub repository."""
 
 import asyncio
+import json
+import logging
 import os
 import tempfile
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
@@ -12,6 +15,8 @@ import httpx
 
 from ..config import get_index_path, get_max_rows
 from .index_local import index_local
+
+logger = logging.getLogger(__name__)
 
 # Supported data file extensions
 DATA_EXTENSIONS = frozenset([
@@ -83,9 +88,18 @@ async def _fetch_repo_tree(
     return r.json().get("tree", [])
 
 
-def _discover_data_files(tree: list[dict]) -> list[dict]:
-    """Filter tree entries to supported data files within size limits."""
+def _discover_data_files(tree: list[dict]) -> tuple[list[dict], dict]:
+    """Filter tree entries to supported data files within size limits.
+
+    Returns (files, skip_counts) — every file excluded at discovery is
+    tallied by reason so the coverage block (1.20.0) can disclose it.
+    """
     files = []
+    skip_counts: dict = {}
+
+    def _skip(reason: str) -> None:
+        skip_counts[reason] = skip_counts.get(reason, 0) + 1
+
     for entry in tree:
         if entry.get("type") != "blob":
             continue
@@ -94,17 +108,22 @@ def _discover_data_files(tree: list[dict]) -> list[dict]:
 
         ext = os.path.splitext(path)[1].lower()
         if ext not in DATA_EXTENSIONS:
+            _skip("unsupported_extension")
             continue
         if _should_skip(path):
+            _skip("skipped_path")
             continue
         if size > MAX_FILE_SIZE:
+            _skip("oversize")
             continue
 
         files.append({"path": path, "size": size})
 
     # Sort by size ascending (index smaller files first)
     files.sort(key=lambda f: f["size"])
-    return files[:MAX_FILES]
+    if len(files) > MAX_FILES:
+        skip_counts["over_file_limit"] = len(files) - MAX_FILES
+    return files[:MAX_FILES], skip_counts
 
 
 async def _download_file(
@@ -188,7 +207,7 @@ async def index_repo(
                     return {"error": "GitHub API rate limit exceeded. Set GITHUB_TOKEN env var."}
                 return {"error": f"GitHub API error: {e.response.status_code}"}
 
-            data_files = _discover_data_files(tree)
+            data_files, skip_counts = _discover_data_files(tree)
             if not data_files:
                 return {"error": f"No data files found in {owner}/{repo}. Supported: {', '.join(sorted(DATA_EXTENSIONS))}"}
 
@@ -211,6 +230,7 @@ async def index_repo(
                     else:
                         os.unlink(local_path)
                         warnings.append(f"Failed to download {entry['path']}")
+                        skip_counts["download_failed"] = skip_counts.get("download_failed", 0) + 1
                         return None
 
             download_tasks = [download_one(e) for e in data_files]
@@ -235,6 +255,7 @@ async def index_repo(
 
                 if "error" in idx_result:
                     warnings.append(f"{repo_path}: {idx_result['error']}")
+                    skip_counts["index_error"] = skip_counts.get("index_error", 0) + 1
                 elif idx_result.get("result", {}).get("skipped"):
                     skipped.append({
                         "file": repo_path,
@@ -251,6 +272,7 @@ async def index_repo(
                     })
             except Exception as e:
                 warnings.append(f"{repo_path}: {e}")
+                skip_counts["index_error"] = skip_counts.get("index_error", 0) + 1
             finally:
                 try:
                     os.unlink(local_path)
@@ -262,6 +284,26 @@ async def index_repo(
             Path(store_path).mkdir(parents=True, exist_ok=True)
             marker_path.write_text(head_sha)
 
+        # Coverage block (1.20.0): what this repo ingest excluded, by reason.
+        # Persisted as a sidecar next to the .repo-sha marker so a later
+        # session can still attest what the last ingest walked. A full
+        # re-ingest overwrites it (self-heals).
+        coverage: dict = {
+            "walk": "full",
+            "datasets_indexed": len(indexed_datasets),
+            "recorded_at": datetime.now(timezone.utc).isoformat(),
+        }
+        nonzero_skips = {k: v for k, v in skip_counts.items() if v}
+        if nonzero_skips:
+            coverage["skip_counts"] = nonzero_skips
+        try:
+            Path(store_path).mkdir(parents=True, exist_ok=True)
+            (Path(store_path) / f".repo-coverage-{repo_prefix}.json").write_text(
+                json.dumps(coverage), encoding="utf-8"
+            )
+        except OSError as exc:
+            logger.debug("Could not persist repo coverage sidecar: %s", exc)
+
         duration_s = time.time() - t0
         result_body: dict = {
             "repo": f"{owner}/{repo}",
@@ -270,6 +312,7 @@ async def index_repo(
             "datasets_indexed": len(indexed_datasets),
             "datasets_skipped": len(skipped),
             "datasets": indexed_datasets,
+            "coverage": coverage,
             "duration_seconds": round(duration_s, 1),
         }
         if skipped:

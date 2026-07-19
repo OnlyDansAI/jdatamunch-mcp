@@ -69,7 +69,7 @@ class TestDiscoverDataFiles:
             ("README.md", 200),
             ("data/config.jsonl", 300),
         ])
-        result = _discover_data_files(tree)
+        result, _ = _discover_data_files(tree)
         paths = [f["path"] for f in result]
         assert "data/sales.csv" in paths
         assert "data/config.jsonl" in paths
@@ -81,7 +81,7 @@ class TestDiscoverDataFiles:
             ("small.csv", 1000),
             ("huge.csv", MAX_FILE_SIZE + 1),
         ])
-        result = _discover_data_files(tree)
+        result, _ = _discover_data_files(tree)
         paths = [f["path"] for f in result]
         assert "small.csv" in paths
         assert "huge.csv" not in paths
@@ -91,7 +91,7 @@ class TestDiscoverDataFiles:
             ("node_modules/test/data.csv", 100),
             ("data/real.csv", 100),
         ])
-        result = _discover_data_files(tree)
+        result, _ = _discover_data_files(tree)
         paths = [f["path"] for f in result]
         assert "data/real.csv" in paths
         assert "node_modules/test/data.csv" not in paths
@@ -100,7 +100,7 @@ class TestDiscoverDataFiles:
         tree = self._make_tree([
             (f"data/file{i}.csv", 100) for i in range(30)
         ])
-        result = _discover_data_files(tree)
+        result, _ = _discover_data_files(tree)
         assert len(result) == 20  # MAX_FILES
 
     def test_sorted_by_size(self):
@@ -109,7 +109,7 @@ class TestDiscoverDataFiles:
             ("small.csv", 100),
             ("medium.csv", 2000),
         ])
-        result = _discover_data_files(tree)
+        result, _ = _discover_data_files(tree)
         sizes = [f["size"] for f in result]
         assert sizes == sorted(sizes)
 
@@ -119,7 +119,7 @@ class TestDiscoverDataFiles:
             ("d.xls", 100), ("e.parquet", 100), ("f.jsonl", 100),
             ("g.ndjson", 100),
         ])
-        result = _discover_data_files(tree)
+        result, _ = _discover_data_files(tree)
         assert len(result) == 7
 
     def test_ignores_non_blob_entries(self):
@@ -127,11 +127,11 @@ class TestDiscoverDataFiles:
             {"type": "tree", "path": "data", "size": 0},
             {"type": "blob", "path": "data/test.csv", "size": 100},
         ]
-        result = _discover_data_files(tree)
+        result, _ = _discover_data_files(tree)
         assert len(result) == 1
 
     def test_empty_tree(self):
-        assert _discover_data_files([]) == []
+        assert _discover_data_files([]) == ([], {})
 
 
 # ---------------------------------------------------------------------------
