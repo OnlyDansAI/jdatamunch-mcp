@@ -1822,7 +1822,24 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         except Exception:
             pass
 
-        return [TextContent(type="text", text=json.dumps(result, indent=2))]
+        # v1.21.0: advisory session budget (suite parity with jcm). Attached
+        # AFTER meta_fields filtering so the warning survives the
+        # token-efficient default (_meta stripped). Never blocks.
+        try:
+            from .storage.token_tracker import budget_status as _budget_status
+            _b = _budget_status()
+            if _b is not None and _b["state"] in ("approaching", "over") and isinstance(result, dict):
+                result.setdefault("_meta", {})["budget"] = _b
+        except Exception:
+            pass
+
+        _text = json.dumps(result, indent=2)
+        try:
+            from .storage.token_tracker import record_response_text as _rrt
+            _rrt(_text)
+        except Exception:
+            pass
+        return [TextContent(type="text", text=_text)]
 
     except Exception as e:
         try:

@@ -5,7 +5,14 @@ from typing import Optional
 
 from ..config import get_index_path
 from ..storage.data_store import DataStore
-from ..storage.token_tracker import get_total_saved, get_per_tool_savings, cost_avoided, PRICING
+from ..storage.token_tracker import (
+    PRICING,
+    budget_status,
+    cost_avoided,
+    get_per_tool_savings,
+    get_session_response_tokens,
+    get_total_saved,
+)
 
 
 def get_session_stats(storage_path: Optional[str] = None) -> dict:
@@ -34,16 +41,22 @@ def get_session_stats(storage_path: Optional[str] = None) -> dict:
         reverse=True,
     )
 
-    return {
-        "result": {
-            "total_tokens_saved": total_saved,
-            "total_cost_avoided": total_costs,
-            "per_tool": per_tool_sorted,
-            "pricing_reference": {
-                model: f"${rate * 1_000_000:.2f}/1M tokens"
-                for model, rate in PRICING.items()
-            },
+    result = {
+        "total_tokens_saved": total_saved,
+        "total_cost_avoided": total_costs,
+        "per_tool": per_tool_sorted,
+        "pricing_reference": {
+            model: f"${rate * 1_000_000:.2f}/1M tokens"
+            for model, rate in PRICING.items()
         },
+        "session_response_tokens": get_session_response_tokens(),
+    }
+    budget = budget_status()
+    if budget is not None:
+        result["budget"] = budget
+
+    return {
+        "result": result,
         "_meta": {
             "timing_ms": round((time.time() - t0) * 1000, 1),
             "tokens_saved": 0,

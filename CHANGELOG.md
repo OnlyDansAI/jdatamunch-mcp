@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.21.0] - 2026-07-19 - advisory session token budget
+
+Suite parity with jcodemunch-mcp v1.108.146 / jdocmunch-mcp v1.104.0. Set
+`JDATAMUNCH_SESSION_TOKEN_BUDGET` to an advisory ceiling over response
+tokens served (counted at the response chokepoint, bytes/4 — the savings
+meter's scale). Once the session crosses 80% of the limit, every response
+carries `_meta.budget = {limit, spent, state}` (`approaching` at >=80%,
+`over` at >=100%) — attached AFTER meta_fields filtering so the warning
+survives the token-efficient default that strips `_meta`.
+`get_session_stats` gains `session_response_tokens` and, when configured,
+the `budget` block in all three states. Never blocks, throttles, or
+truncates (distinct from the existing per-response `enforce_budget`
+truncator, which bounds a single response's size; this tracks cumulative
+session spend and only ever warns). Unset/`0` disables; wire is
+byte-identical. Additive/1.x; inline compute, no new background or network
+behavior, no INDEX_VERSION bump. Tests: `tests/test_v1_21_0.py` (9).
+
 ## [1.20.0] - 2026-07-19 - coverage contract on absence claims
 
 Suite parity with the sibling code MCP's coverage contract, prompted by

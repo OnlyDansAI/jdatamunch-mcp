@@ -481,6 +481,7 @@ Multiple filters are ANDed. No raw SQL accepted — injection surface is zero.
 | `JDATAMUNCH_MAX_ROWS` | `5,000,000` | Row cap for indexing |
 | `JDATAMUNCH_MAX_RESPONSE_TOKENS` | `8,000` | Token budget cap per response |
 | `JDATAMUNCH_SHARE_SAVINGS` | `1` | Set `0` to disable anonymous token savings telemetry |
+| `JDATAMUNCH_SESSION_TOKEN_BUDGET` | unset | Advisory session budget over response tokens served. When set, responses carry `_meta.budget` at >=80% (`approaching`) / >=100% (`over`) and `get_session_stats` reports the block. Never blocks or truncates. Unset/`0` = off |
 | `ANTHROPIC_API_KEY` | — | AI column summaries via Claude |
 | `GOOGLE_API_KEY` | — | AI column summaries via Gemini |
 | `GITHUB_TOKEN` | — | Private repo access for `index_repo` |

@@ -115,6 +115,72 @@ def get_total_saved(base_path: Optional[str] = None) -> int:
         return 0
 
 
+# ---------------------------------------------------------------------------
+# v1.21.0 — advisory session token budget (suite parity with jcm v1.108.146)
+#
+# Counts response tokens SERVED (the context this server injects into the
+# agent) against an advisory ceiling. Never blocks or truncates — awareness
+# only. Wire shape: _meta.budget = {limit, spent, state} with state
+# ok / approaching (>=80%) / over (>=100%).
+# ---------------------------------------------------------------------------
+
+_SESSION_RESPONSE_LOCK = threading.Lock()
+_SESSION_RESPONSE_TOKENS = 0
+_BUDGET_APPROACHING_PCT = 0.8
+
+
+def record_response_text(text: str) -> int:
+    """Count a serialized tool response toward the session budget.
+
+    Returns the cumulative session response tokens (bytes/4 estimate,
+    same scale as the savings meter).
+    """
+    global _SESSION_RESPONSE_TOKENS
+    try:
+        tokens = len(text.encode("utf-8")) // _BYTES_PER_TOKEN
+    except Exception:
+        tokens = len(text) // _BYTES_PER_TOKEN
+    with _SESSION_RESPONSE_LOCK:
+        _SESSION_RESPONSE_TOKENS += max(0, tokens)
+        return _SESSION_RESPONSE_TOKENS
+
+
+def get_session_response_tokens() -> int:
+    """Cumulative response tokens served this session (process lifetime)."""
+    with _SESSION_RESPONSE_LOCK:
+        return _SESSION_RESPONSE_TOKENS
+
+
+def budget_status() -> Optional[dict]:
+    """Session budget snapshot ({limit, spent, state}) or None when unset.
+
+    Configured via ``JDATAMUNCH_SESSION_TOKEN_BUDGET`` (int response tokens;
+    unset/0/garbage = disabled).
+    """
+    raw = os.environ.get("JDATAMUNCH_SESSION_TOKEN_BUDGET", "")
+    try:
+        limit = int(raw.strip())
+    except (ValueError, AttributeError):
+        return None
+    if limit <= 0:
+        return None
+    spent = get_session_response_tokens()
+    if spent >= limit:
+        state = "over"
+    elif spent >= limit * _BUDGET_APPROACHING_PCT:
+        state = "approaching"
+    else:
+        state = "ok"
+    return {"limit": limit, "spent": spent, "state": state}
+
+
+def reset_session_response_tokens() -> None:
+    """Test hook — clear the session response-token counter."""
+    global _SESSION_RESPONSE_TOKENS
+    with _SESSION_RESPONSE_LOCK:
+        _SESSION_RESPONSE_TOKENS = 0
+
+
 def estimate_savings(raw_bytes: int, response_bytes: int) -> int:
     """Estimate tokens saved: (raw - response) / bytes_per_token."""
     return max(0, (raw_bytes - response_bytes) // _BYTES_PER_TOKEN)
