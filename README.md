@@ -489,6 +489,13 @@ Multiple filters are ANDed. No raw SQL accepted — injection surface is zero.
 | `GOOGLE_EMBED_MODEL` | — | Gemini embedding model for semantic search |
 | `OPENAI_API_KEY` | — | OpenAI embeddings for semantic search |
 | `OPENAI_EMBED_MODEL` | — | OpenAI embedding model for semantic search |
+| `JDATAMUNCH_LAUNCH_ID` | — | Opaque launch token echoed back as `launch_id` in the `munch://runtime/identity` resource (fallback: `MUNCH_LAUNCH_ID`); omitted when unset |
+
+---
+
+## Runtime identity resource
+
+The server exposes one MCP resource, `munch://runtime/identity` — a read-only `munch.runtime.identity/v1` JSON document identifying this exact server process (`product`, `version`, `transport`, `pid`, OS-derived `process_start`, per-process-lifetime `instance_id`, optional `launch_id` echo). Multi-agent harnesses use it to tell command-line-identical servers apart and detect restarts. Computed on demand with no disk reads, writes, or network; when the OS process-start probe is unavailable the timestamp is disclosed as `source: "self_recorded"`, never fabricated. Command lines, env, cwd, hostnames, and dataset paths are deliberately excluded. Same contract in jcodemunch-mcp and jdocmunch-mcp.
 
 ---
 

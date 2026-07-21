@@ -10,8 +10,10 @@ import traceback
 from typing import Optional
 
 from mcp.server import Server
+from mcp.server.lowlevel.helper_types import ReadResourceContents
 from mcp.types import Tool, ToolAnnotations, TextContent, Resource
 
+from . import runtime_identity
 from .tools.index_local import index_local
 from .tools.list_datasets import list_datasets
 from .tools.describe_dataset import describe_dataset
@@ -1437,8 +1439,32 @@ def _generate_data_md_snippet() -> str:
 
 @server.list_resources()
 async def list_resources() -> list[Resource]:
-    """Return empty resource list for client compatibility."""
-    return []
+    """Advertise the runtime identity resource (munch.runtime.identity/v1)."""
+    return [
+        Resource(
+            uri=runtime_identity.IDENTITY_URI,
+            name="runtime-identity",
+            description=(
+                "Process provenance for this server instance "
+                f"({runtime_identity.IDENTITY_SCHEMA}): product, version, "
+                "transport, pid, OS-derived process_start, per-process "
+                "instance_id, optional launch_id echo. Read-only, no side effects."
+            ),
+            mimeType="application/json",
+        )
+    ]
+
+
+@server.read_resource()
+async def read_resource(uri) -> "list[ReadResourceContents]":
+    if str(uri) == runtime_identity.IDENTITY_URI:
+        return [
+            ReadResourceContents(
+                content=runtime_identity.identity_json(),
+                mime_type="application/json",
+            )
+        ]
+    raise ValueError(f"Unknown resource: {uri}")
 
 
 @server.list_prompts()
