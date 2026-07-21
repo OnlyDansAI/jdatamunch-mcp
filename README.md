@@ -491,6 +491,8 @@ Multiple filters are ANDed. No raw SQL accepted — injection surface is zero.
 | `OPENAI_EMBED_MODEL` | — | OpenAI embedding model for semantic search |
 | `JDATAMUNCH_LAUNCH_ID` | — | Opaque launch token echoed back as `launch_id` in the `munch://runtime/identity` resource (fallback: `MUNCH_LAUNCH_ID`); omitted when unset |
 
+`get_session_stats` also reports a `tool_surface` receipt: visible vs catalog tool counts, estimated schema tokens for each (bytes/4 scale), tokens avoided by the active tool profile, and the heaviest tool schemas. Computed inline on the stats call; nothing persisted.
+
 ---
 
 ## Runtime identity resource

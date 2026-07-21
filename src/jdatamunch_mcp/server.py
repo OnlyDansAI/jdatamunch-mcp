@@ -135,6 +135,47 @@ def _filter_tools(tools: list[Tool]) -> list[Tool]:
     return tools
 
 
+def _tool_surface_stats(top_n: int = 15) -> dict:
+    """Schema token weight of the visible tool surface vs the full catalog.
+
+    Suite parity with jcodemunch-mcp v1.108.153 / jdocmunch-mcp v1.112.0.
+    Estimated at the meter's bytes/4 scale over the {name, description,
+    inputSchema} serialization. Advisory receipt only — never blocks, nothing
+    persisted. jData has no Counter surface, so the block carries `profile`
+    but no `surface` key.
+    """
+    import json as _json
+
+    def _weight(tool: Tool) -> int:
+        payload = _json.dumps(
+            {
+                "name": tool.name,
+                "description": tool.description or "",
+                "inputSchema": tool.inputSchema or {},
+            },
+            separators=(",", ":"),
+            default=str,
+        )
+        return max(1, len(payload.encode("utf-8")) // 4)
+
+    catalog_tools = _all_tools()
+    visible = {t.name: _weight(t) for t in _filter_tools(catalog_tools)}
+    catalog = {t.name: _weight(t) for t in catalog_tools}
+    visible_total = sum(visible.values())
+    catalog_total = sum(catalog.values())
+    heaviest = dict(sorted(visible.items(), key=lambda kv: -kv[1])[:top_n])
+    return {
+        "profile": _get_tool_profile(),
+        "visible_tools": len(visible),
+        "catalog_tools": len(catalog),
+        "schema_tokens_visible": visible_total,
+        "schema_tokens_catalog": catalog_total,
+        "schema_tokens_avoided": max(0, catalog_total - visible_total),
+        "heaviest_tools": heaviest,
+        "estimator": "bytes/4",
+    }
+
+
 # --- MCP read-only annotations (suite parity with jcodemunch PR #361) --------
 # MCP clients that gate execution (Claude Code plan mode) prompt for approval on
 # every tool they cannot prove is read-only. jData is read-only by charter apart
@@ -1607,6 +1648,15 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             )
         elif name == "get_session_stats":
             result = get_session_stats(storage_path=storage_path)
+            # Tool-surface schema receipt (v1.23.0, jcm v1.108.153 parity).
+            # Advisory only — a failure here must never break the stats tool.
+            try:
+                result["result"]["tool_surface"] = _tool_surface_stats()
+            except Exception:
+                import logging
+                logging.getLogger(__name__).debug(
+                    "tool_surface stats failed", exc_info=True
+                )
         elif name == "get_schema_drift":
             result = get_schema_drift(
                 dataset_a=arguments["dataset_a"],
