@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.24.0] - 2026-07-23 - canonical handoff contract: finalize_handoff + munch://handoff/<id> (suite parity, jcodemunch-mcp #374)
+
+New tool `finalize_handoff` (`jdatamunch.handoff/v1`) + resource
+`munch://handoff/<id>` — suite parity with jcodemunch-mcp v1.108.162 and
+jdocmunch-mcp v1.114.2. A multi-step data audit ends with one authoritative,
+server-owned Markdown handoff: the assistant authors the analysis; the server
+deterministically assembles the caller's sections plus optional named
+appendices (each exactly once, duplicates rejected), validates every
+`evidence_refs` entry against the session's actual retrieval record (column
+ids `<dataset>::<column>#column` and dataset names served by `search_data` /
+`describe_dataset` / `describe_column`, recorded at the response chokepoint;
+unknown refs fail closed with an `unknown_refs` list), persists session-scoped
+in memory, and returns a compact receipt `{handoff_id, resource_uri, sha256,
+length, canonical: true}`. The resource serves the immutable body with
+byte-identical repeated reads; `canonical: true` is advisory metadata only.
+No character limit; never writes to your data; standard tier;
+`readOnlyHint: false`. Tool count 38 → 39. Additive/1.x, no INDEX_VERSION
+bump. Tests `tests/test_v1_24_0.py` (15); full suite 580.
+
 ## [1.23.1] - 2026-07-23 - BM25 tokenizer: Unicode word splitting + CJK character bigrams
 
 `bm25.tokenize` used `[A-Za-z0-9_]+`, so every non-ASCII character acted as a

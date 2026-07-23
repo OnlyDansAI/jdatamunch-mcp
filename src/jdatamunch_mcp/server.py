@@ -98,6 +98,7 @@ _TOOL_TIER_STANDARD: frozenset[str] = _TOOL_TIER_CORE | frozenset({
     # Utilities
     "validate_index", "delete_dataset",
     "summarize_dataset", "embed_dataset",
+    "finalize_handoff",
 })
 
 _PROFILE_TIERS: dict[str, frozenset[str] | None] = {
@@ -194,6 +195,7 @@ _NON_READONLY_TOOLS: frozenset[str] = frozenset({
     "ingest_sql_log",
     "tune_weights",          # inspect reads; set/reset writes ranking_tuning.json
     "check_embedding_drift",  # reports by default; force=true re-pins the canary
+    "finalize_handoff",      # persists a session handoff record (jdatamunch.handoff/v1)
 })
 
 
@@ -1413,6 +1415,71 @@ def _all_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="finalize_handoff",
+            description=(
+                "Finalize one canonical Markdown handoff for a completed data "
+                "audit/analysis (jdatamunch.handoff/v1; suite parity with jCodeMunch). "
+                "The server assembles YOUR sections deterministically, validates every "
+                "evidence_refs entry against what this session actually retrieved "
+                "(column ids like '<dataset>::<column>#column' or dataset names served "
+                "by search_data / describe_dataset / describe_column — unknown refs "
+                "fail closed), persists the result session-scoped, and returns a "
+                "compact receipt {handoff_id, resource_uri, sha256, length, "
+                "canonical:true}. Read the immutable body via the munch://handoff/<id> "
+                "resource; repeated reads are byte-identical. Appendices are included "
+                "exactly once; no character limit; never writes to your data."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "dataset": {
+                        "type": "string",
+                        "description": "Dataset the handoff is about.",
+                    },
+                    "task": {
+                        "type": "string",
+                        "description": "The task/question this handoff answers (becomes the title).",
+                    },
+                    "sections": {
+                        "type": "array",
+                        "description": "Ordered report sections, each {heading, content} (markdown). The caller authors these; the server only assembles.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "heading": {"type": "string"},
+                                "content": {"type": "string"},
+                            },
+                            "required": ["heading", "content"],
+                        },
+                    },
+                    "evidence_refs": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Column ids or dataset names retrieved this session; validated against the session retrieval record.",
+                    },
+                    "profile": {
+                        "type": "string",
+                        "default": "general",
+                        "description": "Handoff profile label (e.g. data_audit).",
+                    },
+                    "appendices": {
+                        "type": "array",
+                        "description": "Optional named appendices, each {name, content, content_type?}; names must be unique.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "name": {"type": "string"},
+                                "content": {"type": "string"},
+                                "content_type": {"type": "string"},
+                            },
+                            "required": ["name", "content"],
+                        },
+                    },
+                },
+                "required": ["dataset", "task", "sections", "evidence_refs"],
+            },
+        ),
+        Tool(
             name="jdatamunch_guide",
             description=(
                 "Return the version-current CLAUDE.md / AGENT.md policy snippet for "
@@ -1480,8 +1547,9 @@ def _generate_data_md_snippet() -> str:
 
 @server.list_resources()
 async def list_resources() -> list[Resource]:
-    """Advertise the runtime identity resource (munch.runtime.identity/v1)."""
-    return [
+    """Advertise the runtime identity resource (munch.runtime.identity/v1)
+    plus any session-finalized canonical handoffs (jdatamunch.handoff/v1)."""
+    resources = [
         Resource(
             uri=runtime_identity.IDENTITY_URI,
             name="runtime-identity",
@@ -1494,6 +1562,17 @@ async def list_resources() -> list[Resource]:
             mimeType="application/json",
         )
     ]
+    from . import handoff as _handoff_mod
+    for row in _handoff_mod.list_handoff_resources():
+        resources.append(
+            Resource(
+                uri=row["uri"],
+                name=row["name"],
+                description=row["description"],
+                mimeType=_handoff_mod.HANDOFF_CONTENT_TYPE,
+            )
+        )
+    return resources
 
 
 @server.read_resource()
@@ -1503,6 +1582,15 @@ async def read_resource(uri) -> "list[ReadResourceContents]":
             ReadResourceContents(
                 content=runtime_identity.identity_json(),
                 mime_type="application/json",
+            )
+        ]
+    from . import handoff as _handoff_mod
+    rec = _handoff_mod.handoff_for_uri(str(uri))
+    if rec is not None:
+        return [
+            ReadResourceContents(
+                content=rec["body"],
+                mime_type=_handoff_mod.HANDOFF_CONTENT_TYPE,
             )
         ]
     raise ValueError(f"Unknown resource: {uri}")
@@ -1584,6 +1672,16 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 redact=arguments.get("redact", True),
                 redact_patterns=arguments.get("redact_patterns"),
                 storage_path=storage_path,
+            )
+        elif name == "finalize_handoff":
+            from . import handoff as _handoff_mod
+            result = _handoff_mod.finalize_handoff(
+                dataset=arguments["dataset"],
+                task=arguments["task"],
+                sections=arguments["sections"],
+                evidence_refs=arguments["evidence_refs"],
+                profile=arguments.get("profile", "general"),
+                appendices=arguments.get("appendices"),
             )
         elif name == "search_data":
             result = search_data(
@@ -1895,6 +1993,26 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 ok=not (isinstance(result, dict) and "error" in result),
                 storage_path=storage_path,
             )
+        except Exception:
+            pass
+
+        # v1.24.0: session retrieval record for handoff attestation
+        # (jdatamunch.handoff/v1 — suite parity with jcm #374). Records the
+        # column ids / dataset names this server actually served, so
+        # finalize_handoff can attest evidence_refs against real retrieval.
+        try:
+            from . import handoff as _handoff_record
+            if isinstance(result, dict) and "error" not in result:
+                if name == "search_data":
+                    _handoff_record.note_served_rows(
+                        result.get("result") or [], dataset=arguments.get("dataset")
+                    )
+                elif name in ("describe_dataset", "sample_rows", "get_rows"):
+                    _handoff_record.note_served_rows([], dataset=arguments.get("dataset"))
+                elif name == "describe_column":
+                    _handoff_record.note_served_column(
+                        arguments.get("dataset"), arguments.get("column")
+                    )
         except Exception:
             pass
 

@@ -501,6 +501,12 @@ The server exposes one MCP resource, `munch://runtime/identity` — a read-only 
 
 ---
 
+## Canonical handoff (`finalize_handoff` + `munch://handoff/<id>`)
+
+A multi-step data audit can end with one authoritative, server-attested result. The assistant authors the analysis; `finalize_handoff` takes those sections plus `evidence_refs`, validates every reference against what this session **actually retrieved** (column ids like `<dataset>::<column>#column` or dataset names served by `search_data` / `describe_dataset` / `describe_column` — unknown refs fail closed), deterministically assembles one canonical Markdown handoff (`jdatamunch.handoff/v1`), and returns a compact receipt: `{handoff_id, resource_uri, sha256, length, canonical: true}`. The immutable body is served by the `munch://handoff/<id>` resource — repeated reads are byte-identical. Session-scoped, in-memory, never writes to your data; appendices appear exactly once; no character limit. Suite parity with jcodemunch-mcp and jdocmunch-mcp.
+
+---
+
 ## When does it help?
 
 | Scenario | Without jDataMunch | With jDataMunch | Measured savings |
