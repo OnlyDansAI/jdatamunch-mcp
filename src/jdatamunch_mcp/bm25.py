@@ -12,16 +12,48 @@ import re
 from typing import Iterable
 
 
-_TOKEN_RX = re.compile(r"[A-Za-z0-9_]+")
+# Unicode word runs, underscore included so snake_case identifiers stay whole.
+# (Was [A-Za-z0-9_]+, which silently dropped ALL non-ASCII — CJK column names
+# and values produced zero tokens; jdocmunch #91 class.)
+_TOKEN_RX = re.compile(r"\w+")
+# CJK scripts carry no whitespace word boundaries; runs in these ranges are
+# expanded to overlapping character bigrams (same expansion at index and
+# query time, so bigram overlap is the match signal).
+_CJK_RX = re.compile(
+    "[ᄀ-ᇿ"  # Hangul Jamo
+    "぀-ヿ"  # Hiragana + Katakana
+    "㄰-㆏"  # Hangul Compatibility Jamo
+    "ㇰ-ㇿ"  # Katakana Phonetic Extensions
+    "㐀-䶿"  # CJK Unified Ideographs Extension A
+    "一-鿿"  # CJK Unified Ideographs
+    "가-힯"  # Hangul Syllables
+    "豈-﫿]+"  # CJK Compatibility Ideographs
+)
 _K1 = 1.5
 _B = 0.75
 
 
+def _cjk_bigrams(run: str) -> list[str]:
+    """Overlapping character bigrams for a CJK run; a lone char passes through."""
+    if len(run) == 1:
+        return [run]
+    return [run[i : i + 2] for i in range(len(run) - 1)]
+
+
 def tokenize(text: str) -> list[str]:
-    """Lowercase + split on word boundaries."""
+    """Lowercase + split on Unicode word boundaries; CJK runs become bigrams."""
     if not text:
         return []
-    return [m.group(0).lower() for m in _TOKEN_RX.finditer(text)]
+    # Pad CJK runs with spaces so mixed-script tokens split cleanly.
+    text = _CJK_RX.sub(lambda m: " " + m.group(0) + " ", text)
+    out: list[str] = []
+    for m in _TOKEN_RX.finditer(text):
+        tok = m.group(0).lower()
+        if _CJK_RX.fullmatch(tok):
+            out.extend(_cjk_bigrams(tok))
+        else:
+            out.append(tok)
+    return out
 
 
 class BM25:

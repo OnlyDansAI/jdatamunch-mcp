@@ -46,3 +46,34 @@ def test_search_data_uses_bm25_in_all_scope(tmp_path):
     assert isinstance(res["result"], list) and res["result"]
     # The top result should reference the customer_email column.
     assert res["result"][0]["name"].lower().startswith("customer")
+
+
+# --- v1.23.1: Unicode + CJK bigram tokenization (jdocmunch #91 class) -------
+
+
+def test_tokenize_korean_produces_bigrams():
+    # Was [] — the old [A-Za-z0-9_]+ regex dropped all non-ASCII.
+    assert tokenize("초과근무 승인") == ["초과", "과근", "근무", "승인"]
+
+
+def test_tokenize_accented_latin_intact():
+    # Was ['caf', 'na', 've'].
+    assert tokenize("café naïve") == ["café", "naïve"]
+
+
+def test_tokenize_mixed_snake_case_and_cjk():
+    toks = tokenize("user_id 급여액")
+    assert "user_id" in toks  # underscore-joined tokens stay whole
+    assert "급여" in toks and "여액" in toks
+
+
+def test_tokenize_single_cjk_char_kept():
+    assert tokenize("車") == ["車"]
+
+
+def test_bm25_korean_query_scores_korean_doc():
+    docs = [tokenize("초과근무 승인 규칙"), tokenize("product id price")]
+    bm25 = BM25(docs)
+    q = tokenize("초과근무")
+    assert bm25.score(q, 0) > 0.0
+    assert bm25.score(q, 1) == 0.0

@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.23.1] - 2026-07-23 - BM25 tokenizer: Unicode word splitting + CJK character bigrams
+
+`bm25.tokenize` used `[A-Za-z0-9_]+`, so every non-ASCII character acted as a
+separator: CJK column names, summaries, and sample values produced zero
+tokens — `search_data`'s keyword ranking contributed nothing for those
+datasets — and accented Latin was mangled (`café` → `caf`). The tokenizer now
+splits on Unicode word boundaries (`\w+`, underscore still kept inside tokens
+so `user_id` stays whole) and expands CJK runs (Hangul, Hiragana/Katakana,
+Han) into overlapping character bigrams, applied identically at index and
+query time so bigram overlap is the match signal. Pure-ASCII tokenization is
+unchanged. Suite parity with jdocmunch-mcp v1.114.1 (#91 there) and
+jcodemunch-mcp v1.108.161. No reindex needed — tokenization happens at
+search time.
+
 ## [1.23.0] - 2026-07-21 - tool-surface schema receipt in session stats (suite parity, jcodemunch-mcp v1.108.153)
 
 `get_session_stats` now carries an advisory `tool_surface` block inside
