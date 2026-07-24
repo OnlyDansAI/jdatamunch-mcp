@@ -108,6 +108,7 @@ def build_verdict(
     semantic_requested: bool = False,
     semantic_available: bool = True,
     lexical_used: bool = True,
+    index_changed: bool = False,
     did_you_mean: Optional[Sequence[str]] = None,
     coverage: Optional[dict] = None,
 ) -> dict:
@@ -121,6 +122,12 @@ def build_verdict(
     excluded at index time, while ``ok`` verdicts stay lean.
     """
     if semantic_requested and not semantic_available:
+        state = STATE_DEGRADED
+    elif result_count == 0 and index_changed:
+        # The dataset was rewritten underneath this scan, so "we looked and it
+        # is not there" describes rows that were moving while we read them.
+        # degraded cannot prove absence, so the refusal falls out of the
+        # existing "only `absent` proves absence" check.
         state = STATE_DEGRADED
     elif result_count == 0:
         state = STATE_ABSENT
@@ -143,6 +150,13 @@ def build_verdict(
         },
         "note": _NOTES[state],
     }
+    if index_changed:
+        # Present ONLY as a positive detection. jData models no index
+        # freshness, so a permanent `index: "fresh"` would be a claim this
+        # product cannot back — the same honesty that made the stale gate a
+        # disclosure here rather than a rule. We can prove it IS being
+        # rewritten; we cannot prove it is current.
+        verdict["channels"]["index"] = "rebuilding"
     if did_you_mean:
         verdict["did_you_mean"] = list(did_you_mean)[:5]
     if coverage and state in (STATE_ABSENT, STATE_DEGRADED):

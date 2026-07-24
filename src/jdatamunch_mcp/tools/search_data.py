@@ -6,7 +6,7 @@ from typing import Optional
 
 from ..bm25 import BM25, tokenize
 from ..config import get_index_path, HARD_CAP_SEARCH_MAX_RESULTS
-from ..storage.data_store import DataStore
+from ..storage.data_store import DataStore, index_changed_since_load
 from ..storage.token_tracker import get_total_saved
 from ..tuning import load_effective_weights
 
@@ -334,6 +334,7 @@ def search_data(
         semantic_requested=semantic_requested,
         semantic_available=bool(sem_scores),
         lexical_used=not semantic_only,
+        index_changed=index_changed_since_load(idx),
         did_you_mean=suggest_columns(query, idx.columns) if not results else None,
         coverage=build_coverage_disclosure(
             idx.coverage,

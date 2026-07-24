@@ -1,5 +1,47 @@
 # Changelog
 
+## [1.27.0] - 2026-07-24 - a rewrite underneath a scan cannot prove absence (5th refusal rule)
+
+Suite parity with jcodemunch-mcp v1.108.168 / jdocmunch-mcp v1.119.0 — but this
+one is **enforced here, not merely disclosed**.
+
+### Fixed
+
+- **Absence evidence could be minted over a dataset that was being rewritten.**
+  v1.26.0 shipped the absence contract with the rules jData's verdict can
+  actually back: only `absent` proves absence, and a truncated row walk does
+  not. Index freshness is *disclosed as untracked* rather than gated, because
+  this product models none — a rule that reads as enforced and isn't would be
+  worse than an honest limitation.
+
+  A rewrite is different. "Was this rewritten while I read it" is a filesystem
+  fact, not a freshness model, so unlike the stale gate it can be backed for
+  real — the same way the truncation gate is real here. Zero results plus a
+  detected rewrite now yields `degraded` instead of `absent`, and because
+  `degraded` already cannot prove absence, the rule falls out of the existing
+  "only `absent` proves absence" check.
+
+- **`channels.index: "rebuilding"` appears only as a positive detection.** The
+  siblings carry a permanent `fresh`/`stale` channel; jData does not, and adding
+  one would assert currency this product cannot verify. The key is present when
+  a rewrite is detected and absent otherwise: we can prove the dataset **is**
+  being rewritten, we cannot prove it is current. The v1.26.0 disclosure
+  ("index freshness: not tracked by this product") stands unchanged — this rule
+  adds to it, never replaces it.
+
+### Notes
+
+- The dataset mtime deliberately spans **`data.sqlite` and its WAL**, not just
+  `index.json`: the rows a search scans live in the SQLite store, so a reindex
+  that rewrites rows must register even when the metadata monolith is untouched.
+  A guard watching only `index.json` would have missed the common case.
+- **Unknown is not changed**: an index with no stamped provenance, or one whose
+  files are no longer readable, reports unchanged rather than degrading every
+  verdict.
+- Byte-identical for existing callers when nothing is being rewritten. NO new
+  tool, NO tool-count or `INDEX_VERSION` change. New `tests/test_v1_27_0.py`
+  (15).
+
 ## [1.26.0] - 2026-07-24 - absence evidence: cite a zero-result scan as proof (handoff/v2 phase 3, suite parity)
 
 Absence evidence, suite parity with jcodemunch-mcp v1.108.166 / jdocmunch-mcp

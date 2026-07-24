@@ -121,6 +121,71 @@ def _index_to_dict(idx: DataIndex) -> dict:
     }
 
 
+def _dataset_mtime_ns(index_path, sqlite_path) -> int:
+    """Newest mtime across the files a scan actually reads.
+
+    Covers ``data.sqlite`` (and its WAL) as well as ``index.json``: the rows a
+    search scans live in the SQLite store, so a reindex that rewrites rows must
+    register even when the metadata monolith is untouched.
+    """
+    newest = 0
+    for p in (index_path, sqlite_path, str(sqlite_path) + "-wal"):
+        try:
+            from pathlib import Path
+
+            newest = max(newest, Path(p).stat().st_mtime_ns)
+        except OSError:
+            continue
+    return newest
+
+
+def _stamp_load_provenance(index, index_path, sqlite_path):
+    """Record the dataset's on-disk mtime at load time.
+
+    Backs the fifth absence refusal rule: a zero-result scan proves nothing if
+    the dataset was rewritten while it was being read. Deliberately a
+    filesystem signal so it still fires when a separate process drives the
+    reindex.
+    """
+    try:
+        index._dataset_paths = (str(index_path), str(sqlite_path))
+        index._loaded_mtime_ns = _dataset_mtime_ns(index_path, sqlite_path)
+    except Exception:  # pragma: no cover - defensive; never break a load
+        import logging
+
+        logging.getLogger(__name__).debug(
+            "Could not stamp load provenance", exc_info=True
+        )
+    return index
+
+
+def index_changed_since_load(index) -> bool:
+    """Whether the dataset was rewritten since it was loaded (never raises).
+
+    jData models no index freshness, which is why there is no stale-index
+    refusal rule — but "was this rewritten under me" is a filesystem fact, not
+    a freshness model, so unlike the stale gate this one is genuinely
+    enforceable here rather than merely disclosed.
+
+    Unknown is NOT changed: an index with no stamped provenance returns False
+    rather than degrading every verdict.
+    """
+    try:
+        paths = getattr(index, "_dataset_paths", None)
+        loaded_at = getattr(index, "_loaded_mtime_ns", None)
+        if not paths or loaded_at is None:
+            return False
+        current = _dataset_mtime_ns(paths[0], paths[1])
+        if current == 0:
+            # Nothing readable on disk: unknown, which is NOT changed. Reporting
+            # a rewrite here would degrade every verdict against a dataset whose
+            # files moved out from under the process.
+            return False
+        return current != int(loaded_at)
+    except Exception:
+        return False
+
+
 def _index_from_dict(d: dict) -> DataIndex:
     return DataIndex(
         dataset=d["dataset"],
@@ -339,7 +404,8 @@ class DataStore:
         if data.get("index_version", 1) != INDEX_VERSION:
             return None  # version mismatch we can't migrate → triggers full re-index
 
-        return _index_from_dict(data)
+        index = _index_from_dict(data)
+        return _stamp_load_provenance(index, path, self.sqlite_path(dataset_id))
 
     def needs_reindex(self, dataset_id: str, source_path: str) -> bool:
         """Return True if the source file has changed or was never indexed."""

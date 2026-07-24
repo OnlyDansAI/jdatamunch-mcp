@@ -134,6 +134,14 @@ def absence_refusal(record: Optional[dict]) -> Optional[str]:
     if not record:
         return None
     state = record.get("state")
+    if (record.get("channels") or {}).get("index") == "rebuilding":
+        # Checked before the generic state rule so the reason names the cause.
+        # Note this IS enforced, unlike the stale gate jData can only
+        # disclose: a rewrite is a filesystem fact, not a freshness model.
+        return (
+            "the dataset was being rewritten during the scan, so the target may "
+            "sit in rows written after the scan passed them"
+        )
     if state != "absent":
         return (
             f"the scan's verdict was '{state}', and only 'absent' can prove absence "
