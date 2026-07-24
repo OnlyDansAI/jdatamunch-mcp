@@ -1442,14 +1442,31 @@ def _all_tools() -> list[Tool]:
                     },
                     "sections": {
                         "type": "array",
-                        "description": "Ordered report sections, each {heading, content} (markdown). The caller authors these; the server only assembles.",
+                        "description": "Ordered report sections, each {heading, content} (markdown). The caller authors these; the server only assembles. Optional per-section claims[] bind evidence to an individual claim instead of one global list (handoff/v2).",
                         "items": {
                             "type": "object",
                             "properties": {
                                 "heading": {"type": "string"},
                                 "content": {"type": "string"},
+                                "claims": {
+                                    "type": "array",
+                                    "description": "Optional caller-authored claims, each {id, statement, evidence_refs, classification?}. Ids must be unique across the handoff; each claim's refs are attested separately and rendered beside the claim.",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "id": {"type": "string"},
+                                            "statement": {"type": "string"},
+                                            "evidence_refs": {
+                                                "type": "array",
+                                                "items": {"type": "string"},
+                                            },
+                                            "classification": {"type": "string"},
+                                        },
+                                        "required": ["id", "statement", "evidence_refs"],
+                                    },
+                                },
                             },
-                            "required": ["heading", "content"],
+                            "required": ["heading"],
                         },
                     },
                     "evidence_refs": {
