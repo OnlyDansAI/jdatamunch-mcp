@@ -1982,6 +1982,33 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             if loop_warning:
                 result.setdefault("_meta", {})["loop_warning"] = loop_warning
 
+        # v1.26.0: absence evidence (#377 phase 3). Record a search_data verdict
+        # so a handoff can cite a zero-result scan as proof. Read BEFORE the
+        # meta_fields filter (default strips _meta); the citable ref is
+        # re-attached AFTER filtering, below, like the budget block. jData's
+        # index models no freshness, so the rendered proof discloses that in
+        # band rather than silently claiming a fresh scan (DISCLOSE decision).
+        _absence_ref = None
+        _absence_blocked = None
+        if (
+            name == "search_data"
+            and isinstance(result, dict)
+            and "error" not in result
+        ):
+            try:
+                from . import handoff as _handoff_absence
+                _v = (result.get("_meta") or {}).get("verdict")
+                if isinstance(_v, dict):
+                    _ref, _why = _handoff_absence.note_absence(
+                        name, arguments.get("dataset"), arguments.get("query"), _v
+                    )
+                    if _ref:
+                        _absence_ref = _ref
+                    elif _why:
+                        _absence_blocked = _why
+            except Exception:
+                pass
+
         if isinstance(result, dict):
             result.setdefault("_meta", {})["powered_by"] = (
                 "jdatamunch-mcp by jgravelle · https://github.com/jgravelle/jdatamunch-mcp"
@@ -2032,6 +2059,20 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                     )
         except Exception:
             pass
+
+        # v1.26.0: re-attach the absence token AFTER meta_fields filtering, so
+        # it survives the token-efficient default (_meta stripped) — same shape
+        # as jdoc's absence_evidence block. An `absent` scan hands the agent a
+        # ref to cite; an absent-but-not-citable scan says so in band, with the
+        # reason, instead of offering a token that would fail at finalize time.
+        if isinstance(result, dict) and "error" not in result:
+            if _absence_ref:
+                result.setdefault("_meta", {})["absence_evidence"] = {"ref": _absence_ref}
+            elif _absence_blocked:
+                result.setdefault("_meta", {})["absence_evidence"] = {
+                    "citable": False,
+                    "blocked_by": _absence_blocked,
+                }
 
         # v1.21.0: advisory session budget (suite parity with jcm). Attached
         # AFTER meta_fields filtering so the warning survives the

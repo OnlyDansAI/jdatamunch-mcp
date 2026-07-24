@@ -1,5 +1,52 @@
 # Changelog
 
+## [1.26.0] - 2026-07-24 - absence evidence: cite a zero-result scan as proof (handoff/v2 phase 3, suite parity)
+
+Absence evidence, suite parity with jcodemunch-mcp v1.108.166 / jdocmunch-mcp
+v1.117.0 (jcodemunch-mcp#377 phase 3, design by @mightydanp). A zero-result
+`search_data` could not be cited under v1 or v2: nothing was served, so there
+was no id to reference. But "we searched the dataset and no such column/value
+is there" is exactly the claim a data audit most needs attested, and the one
+agents most often assert with no proof at all.
+
+No new retrieval machinery. `verdict.build_verdict` already reports a state
+(`ok` / `absent` / `degraded`), per-channel status, index coverage, and a
+scorer pin. `handoff.note_absence` records those verdicts under a deterministic
+ref (`absent:<sha256[:12]>` over `(tool, dataset, query, scope)`) and lets a
+claim cite the scan itself. A `search_data` whose verdict is `absent` now
+carries `_meta.absence_evidence.ref`; passing that ref to `finalize_handoff`
+attests the absence. The ref is re-attached after the default `meta_fields`
+strip, so it survives the token-efficient default.
+
+**The refusal rules are the feature and they are strict.** Only `absent`
+proves absence. `degraded` does not, because a keyword-only fallback is a
+partial scan. A truncated row walk (`coverage.walk == "truncated"`) does not,
+because the target may sit in the rows the ingest pass dropped. A refused scan
+is still recorded, so citing one returns the reason (`refused_absence`, or
+`refused_absence_claims` naming the claim) rather than a bare unknown-ref
+error; an `absent`-but-not-citable live response says so in band via
+`absence_evidence.citable: false` and `blocked_by`.
+
+**Honest divergence from jcm/jdoc, disclosed in every rendered proof.** jData's
+index does not model freshness: its verdict has no `index` channel, so the
+stale-index refusal its siblings enforce cannot fire here. Rather than ship a
+guarantee that reads enforced and isn't, every jData absence proof states
+`index freshness: not tracked by this product` in the body. Absence stays
+citable; the reader is told exactly what was and was not checked. Unknown
+coverage renders as "not recorded for this index (scope unknown)" and is never
+presented as a complete scope. The detail renders once, under its claim when it
+has one, else in the global Evidence index.
+
+Refs are content-addressed, so the same scan in the same scope is the same
+proof and a narrowed scope is a different one. Session-scoped and in-memory,
+capped, never written to disk. Receipt gains `absence_attested` when an absence
+ref is cited, omitted otherwise. New `tests/test_v1_26_0.py` (25, incl. a live
+`call_tool` chokepoint e2e). No new tool, no schema or tool-count change, no
+`INDEX_VERSION` bump. Suite 644.
+
+#377 stays open: phase 2 (evidence receipts) and phase 4 (caller-declared
+requirement matching) remain deferred.
+
 ## [1.25.0] - 2026-07-23 - claim-scoped evidence (handoff/v2 phase 1, suite parity)
 
 Claim-scoped evidence, suite parity with jcodemunch-mcp v1.108.165
