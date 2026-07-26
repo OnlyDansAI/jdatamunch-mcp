@@ -1,5 +1,43 @@
 # Changelog
 
+## [1.29.0] - 2026-07-25 - an ignored argument cannot prove absence
+
+### Fixed
+
+- **A misspelled parameter no longer produces a citable absence proof.** Suite
+  parity with jcodemunch-mcp v1.108.175, where the defect was found live: a
+  `search_text` call passed `regex=true` when the parameter is `is_regex`. Every
+  tool in all three servers reads its arguments key-by-key
+  (`arguments.get("limit", 20)`), so the flag was dropped in silence, the call
+  that ran was not the call that was asked for, and the response still reached
+  `state: "absent"` and minted a citable absence ref.
+- `call_tool` now compares each call's arguments against the tool's published
+  `inputSchema` and, when keys were discarded, downgrades an `absent` verdict to
+  `degraded` and discloses the ignored keys.
+
+### Notes
+
+- **Disclose on every state, refuse only the absence CLAIM.** Rows an `ok` scan
+  returned were really in the dataset and are still the best available answer;
+  only the claim that nothing exists is unfounded. Because the refusal is
+  expressed as a downgrade, `handoff.absence_refusal` does the refusing and
+  there is no second rule to keep in sync.
+- ⚠ **jData difference from jcm: the disclosure rides TOP-LEVEL
+  (`ignored_arguments` + `ignored_arguments_note`), not under `_meta`.** This
+  server strips `_meta` entirely by default (`get_meta_fields()` returns `[]`),
+  so a notice placed there would be deleted before the agent ever saw it — the
+  same trap that forced the top-level `empty`/`hint` keys in v1.28.0 and the
+  post-filter re-attach of the absence ref in v1.26.0. The verdict downgrade
+  runs BEFORE filtering (while `_meta.verdict` exists); the disclosure is
+  attached AFTER.
+- **Deliberately never rejects the call.** Under the 1.x zero-surprise contract
+  an unknown key has always been accepted, so a client sending a harmless extra
+  must not start erroring.
+- **An unknown schema accuses nobody** — an unreadable declaration returns
+  nothing rather than guessing, so the check can never manufacture a warning
+  about a legitimate key.
+- New `tests/test_v1_29_0.py` (15). No schema or INDEX_VERSION change.
+
 ## [1.28.0] - 2026-07-25 - an empty index says so
 
 ### Added

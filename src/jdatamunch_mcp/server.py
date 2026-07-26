@@ -227,6 +227,28 @@ async def list_tools() -> list[Tool]:
     return _apply_readonly_annotations(_filter_tools(_all_tools()))
 
 
+_DECLARED_ARG_KEYS: "Optional[dict]" = None
+
+
+def _declared_arg_keys(name: str):
+    """Declared inputSchema property names for a tool, or None if unknown.
+
+    Built once from the same catalog `list_tools` publishes, so the argument
+    contract can never drift from what the agent was shown. None (not an empty
+    set) when the tool or its schema is missing: an absent declaration is not
+    evidence that a caller's key is wrong.
+    """
+    global _DECLARED_ARG_KEYS
+    if _DECLARED_ARG_KEYS is None:
+        built = {}
+        for t in _all_tools():
+            props = (t.inputSchema or {}).get("properties")
+            if isinstance(props, dict) and props:
+                built[t.name] = frozenset(props)
+        _DECLARED_ARG_KEYS = built
+    return _DECLARED_ARG_KEYS.get(name)
+
+
 def _all_tools() -> list[Tool]:
     """Return the unfiltered list of every tool exposed by this server."""
     return [
@@ -1988,6 +2010,24 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         # re-attached AFTER filtering, below, like the budget block. jData's
         # index models no freshness, so the rendered proof discloses that in
         # band rather than silently claiming a fresh scan (DISCLOSE decision).
+        # v1.29.0: argument contract (suite parity with jcm v1.108.175). Every
+        # tool reads its arguments key-by-key, so a misspelled parameter is
+        # dropped in silence and the call that runs is not the call that was
+        # asked for. Degrade an `absent` verdict here, while `_meta.verdict`
+        # still exists — MUST run before the absence block below so the
+        # "only `absent` proves absence" check does the refusing. The visible
+        # disclosure is attached AFTER meta_fields filtering (see `disclose`).
+        _ignored_args: list = []
+        try:
+            from .tools import _arg_contract
+            _ignored_args = _arg_contract.unrecognized_keys(
+                arguments, _declared_arg_keys(name)
+            )
+            if _ignored_args:
+                _arg_contract.degrade_absent_verdict(result, _ignored_args)
+        except Exception:
+            _ignored_args = []
+
         _absence_ref = None
         _absence_blocked = None
         if (
@@ -2065,6 +2105,17 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         # as jdoc's absence_evidence block. An `absent` scan hands the agent a
         # ref to cite; an absent-but-not-citable scan says so in band, with the
         # reason, instead of offering a token that would fail at finalize time.
+        # v1.29.0: the ignored-argument disclosure rides TOP-LEVEL and is
+        # attached AFTER meta_fields filtering, because `_meta` is stripped
+        # entirely by default — a notice placed there would be deleted before
+        # the agent saw it (same call as `empty`/`hint` in v1.28.0).
+        if _ignored_args and isinstance(result, dict):
+            try:
+                from .tools import _arg_contract
+                _arg_contract.disclose(result, _ignored_args)
+            except Exception:
+                pass
+
         if isinstance(result, dict) and "error" not in result:
             if _absence_ref:
                 result.setdefault("_meta", {})["absence_evidence"] = {"ref": _absence_ref}
