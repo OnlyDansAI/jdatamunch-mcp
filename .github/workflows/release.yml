@@ -69,6 +69,17 @@ jobs:
                   || true)
           [ -z "${NOTES:-}" ] && NOTES="$SUBJ"
 
+          # A green "Release" check means tagged + GitHub-released, NOT
+          # published. PyPI publishing is manual here (local credentials, not a
+          # CI secret), so the two can diverge: v1.28.0 sat GitHub-only until
+          # someone went looking. Say so on the artifact itself rather than only
+          # in a comment at the top of this file.
+          NOTES="${NOTES}
+
+---
+Published to PyPI separately (manual step). If this release is newer than the
+latest version on PyPI, the PyPI upload has not happened yet."
+
           gh release create "$TAG" --repo "$REPO" --target "$SHA" \
             --title "$SUBJ" --notes "$NOTES" \
             dist/*.whl dist/*.tar.gz
