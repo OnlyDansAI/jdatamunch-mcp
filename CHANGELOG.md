@@ -1,5 +1,29 @@
 # Changelog
 
+## [1.28.0] - 2026-07-25 - an empty index says so
+
+### Added
+
+- **`list_datasets` reports an empty store instead of returning a bare `[]`.**
+  Suite parity; raised in correspondence on
+  [jcodemunch-mcp#375](https://github.com/jgravelle/jcodemunch-mcp/issues/375).
+  A user ran this server for months holding **zero datasets** and only found out
+  by going looking: `list_datasets` returned `[]`, which reads identically to
+  "installed and broken". Their words: "we would have fed both tools months
+  ago."
+
+  When nothing is indexed, the response now carries `empty: true` and a `hint`
+  naming `index_local` and saying why it matters, so an empty search is not
+  mistaken for evidence of absence.
+
+  ⚠ Top-level rather than under `_meta`: `get_meta_fields()` returns `[]` by
+  default here, so a nudge placed in `_meta` would be stripped before the agent
+  ever saw it. Same key names as jcodemunch-mcp and jdocmunch-mcp.
+
+  Additive and silent once anything is indexed. New `tests/test_v1_28_0.py` (4).
+  Suite parity: jcodemunch-mcp v1.108.174. NO tool, schema, or INDEX_VERSION
+  change.
+
 ## [1.27.0] - 2026-07-24 - a rewrite underneath a scan cannot prove absence (5th refusal rule)
 
 Suite parity with jcodemunch-mcp v1.108.168 / jdocmunch-mcp v1.119.0 — but this
