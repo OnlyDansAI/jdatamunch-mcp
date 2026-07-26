@@ -74,11 +74,11 @@ jobs:
           # CI secret), so the two can diverge: v1.28.0 sat GitHub-only until
           # someone went looking. Say so on the artifact itself rather than only
           # in a comment at the top of this file.
-          NOTES="${NOTES}
-
----
-Published to PyPI separately (manual step). If this release is newer than the
-latest version on PyPI, the PyPI upload has not happened yet."
+          # ⚠ Keep this on ONE line. A multi-line double-quoted string whose
+          # continuations start at column 0 leaves the YAML block scalar, which
+          # truncates the script mid-quote (`unexpected EOF`) — that broke the
+          # v1.29.0 release run.
+          NOTES="${NOTES}"$'\n\n---\nPublished to PyPI separately (manual step). If this release is newer than the latest version on PyPI, the PyPI upload has not happened yet.'
 
           gh release create "$TAG" --repo "$REPO" --target "$SHA" \
             --title "$SUBJ" --notes "$NOTES" \
